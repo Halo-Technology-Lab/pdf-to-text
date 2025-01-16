@@ -1,5 +1,14 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
 provider "aws" {
-  region = "us-east-1" # Change to your desired region
+  region = "eu-west-2"
 }
 
 resource "aws_iam_role" "lambda_role" {
@@ -36,39 +45,47 @@ resource "aws_iam_role_policy" "lambda_policy" {
   })
 }
 
-resource "aws_lambda_function" "example_lambda" {
-  function_name = "example-lambda-function"
+resource "aws_lambda_function" "lambda_function" {
+  function_name = "pdf-to-text"
   runtime       = "python3.9"
   handler       = "lambda_function.lambda_handler"
   role          = aws_iam_role.lambda_role.arn
 
   filename = "lambda_function.zip"
 
+  timeout = 900 # Timeout in seconds
+
+  # Memory size in MB
+  memory_size = 4000
+
+  # Ephemeral storage in MB (Default: 512 MB, Max: 10,240 MB)
+  ephemeral_storage {
+    size = 2000 # 1 GB
+  }
+
   source_code_hash = filebase64sha256("lambda_function.zip")
 
   environment {
-    variables = {
-      ENV_VAR = "example"
-    }
+    variables = {}
   }
 }
 
-resource "aws_apigatewayv2_api" "example_api" {
-  name          = "example-api"
+resource "aws_apigatewayv2_api" "pdf_to_text" {
+  name          = "pdf-to-text"
   protocol_type = "HTTP"
 }
 
 resource "aws_apigatewayv2_integration" "lambda_integration" {
-  api_id               = aws_apigatewayv2_api.example_api.id
+  api_id               = aws_apigatewayv2_api.pdf_to_text.id
   integration_type     = "AWS_PROXY"
-  integration_uri      = aws_lambda_function.example_lambda.arn
+  integration_uri      = aws_lambda_function.lambda_function.arn
   passthrough_behavior = "WHEN_NO_MATCH"
 
-  depends_on = [aws_lambda_function.example_lambda]
+  depends_on = [aws_lambda_function.lambda_function]
 }
 
 resource "aws_apigatewayv2_route" "default_route" {
-  api_id    = aws_apigatewayv2_api.example_api.id
+  api_id    = aws_apigatewayv2_api.pdf_to_text.id
   route_key = "POST /"
 
   target = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
@@ -77,17 +94,17 @@ resource "aws_apigatewayv2_route" "default_route" {
 resource "aws_lambda_permission" "apigw_permission" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.example_lambda.function_name
+  function_name = aws_lambda_function.lambda_function.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.example_api.execution_arn}/*/*"
+  source_arn    = "${aws_apigatewayv2_api.pdf_to_text.execution_arn}/*/*"
 }
 
 resource "aws_apigatewayv2_stage" "default_stage" {
-  api_id      = aws_apigatewayv2_api.example_api.id
+  api_id      = aws_apigatewayv2_api.pdf_to_text.id
   name        = "$default"
   auto_deploy = true
 }
 
 output "api_endpoint" {
-  value = aws_apigatewayv2_api.example_api.api_endpoint
+  value = aws_apigatewayv2_api.pdf_to_text.api_endpoint
 }
